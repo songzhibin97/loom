@@ -1,0 +1,181 @@
+name: prd-to-ship
+description: 一句需求 → PRD → TRD → 实现 → 测试 → 多视角 review → 提交。
+version: 1
+
+inputs:
+  - name: requirement
+    description: 一句话原始需求
+    required: true
+
+start: gather_requirements
+
+states:
+
+  # ============================================================
+  # Phase 1 — 需求澄清 + PRD
+  # ============================================================
+
+  gather_requirements:
+    kind: skill
+    skill: prd-clarify
+    on_pass: draft_prd
+    on_fail: gather_requirements
+    max_attempts: 2
+    on_exceed: escalate_requirement
+
+  draft_prd:
+    kind: skill
+    skill: prd-author
+    on_pass: review_prd_gate
+    on_fail: draft_prd
+    max_attempts: 3
+    on_exceed: escalate_requirement
+
+  review_prd_gate:
+    kind: gate
+    prompt: |
+      PRD 草稿已生成（artifacts/PRD.md）。
+        - approve            采用，进入 TRD
+        - revise <反馈>      回去改 PRD
+        - back               退回需求澄清
+        - abort              终止
+    routes:
+      approve: draft_trd
+      revise:  draft_prd
+      back:    gather_requirements
+      abort:   _abort
+    feedback_artifact: artifacts/PRD_feedback.md
+
+  # ============================================================
+  # Phase 2 — TRD
+  # ============================================================
+
+  draft_trd:
+    kind: skill
+    skill: trd-author
+    on_pass: review_trd_gate
+    on_fail: draft_trd
+    max_attempts: 3
+    on_exceed: escalate_trd
+
+  review_trd_gate:
+    kind: gate
+    prompt: |
+      TRD 草稿已生成（artifacts/TRD.md）。
+        - approve            采用，进入实现
+        - revise <反馈>      回去改 TRD
+        - back               退回 PRD
+        - abort              终止
+    routes:
+      approve: implement
+      revise:  draft_trd
+      back:    draft_prd
+      abort:   _abort
+    feedback_artifact: artifacts/TRD_feedback.md
+
+  # ============================================================
+  # Phase 3 — 实现 + 测试
+  # ============================================================
+
+  implement:
+    kind: skill
+    skill: implement
+    on_pass: run_tests
+    on_fail: implement
+    max_attempts: 3
+    on_exceed: escalate_trd
+
+  run_tests:
+    kind: skill
+    skill: test-runner
+    on_pass: code_review
+    on_fail: implement              # 测试挂 → 回去重写实现
+    max_attempts: 3
+    on_exceed: escalate_trd         # 试了 3 次还挂 → 怀疑 TRD
+
+  # ============================================================
+  # Phase 4 — 并行多视角 review（含反糊弄）
+  # ============================================================
+
+  code_review:
+    kind: parallel
+    fan_out:
+      - skill: reviewer-quality
+      - skill: reviewer-security
+      - skill: reviewer-test-honesty       # 反"测试糊弄"
+        model_hint: vendor:openai          # 双盲：另一家模型来查
+    aggregator: review-aggregator
+    shared_inputs:
+      - { name: diff, path: artifacts/diff.patch }
+      - { name: trd,  path: artifacts/TRD.md }
+      - { name: prd,  path: artifacts/PRD.md }
+    on_pass: commit
+    on_fail: implement
+    max_attempts: 2
+    on_exceed: escalate_trd
+
+  # ============================================================
+  # Phase 5 — 提交
+  # ============================================================
+
+  commit:
+    kind: skill
+    skill: committer
+    on_pass: done
+    on_fail: commit
+    max_attempts: 2
+    on_exceed: escalate_commit
+
+  done:
+    kind: terminal
+    summary: |
+      跑完 prd-to-ship。
+      产出：artifacts/PRD.md, artifacts/TRD.md, artifacts/diff.patch, artifacts/review_verdict.md
+      历史与诊断见 history。
+
+  # ============================================================
+  # Escalation states
+  # ============================================================
+
+  escalate_requirement:
+    kind: human
+    diagnosis: |
+      在 PRD/澄清 阶段反复失败。多半是原始需求本身不清楚或不一致。
+    prompt: |
+      需求阶段卡住。下一步：
+        1) 我手动修改 artifacts/PRD.md，然后 resume
+        2) 重新输入需求，从头开始
+        3) 终止
+    routes:
+      "1": _resume_after_manual
+      "2": gather_requirements
+      "3": _abort
+
+  escalate_trd:
+    kind: human
+    diagnosis: |
+      在 实现/测试/review 阶段反复失败。多半是 TRD 设计有问题——
+      可能模块拆分不合理、接口不够完整、或漏掉了边界条件。
+    prompt: |
+      技术方案疑似走不通。下一步：
+        1) 回到 TRD 重新设计 (draft_trd)
+        2) 回到 PRD 重新审视需求 (draft_prd)
+        3) 我手动改 artifacts/，你 resume
+        4) 终止
+    routes:
+      "1": draft_trd
+      "2": draft_prd
+      "3": _resume_after_manual
+      "4": _abort
+
+  escalate_commit:
+    kind: human
+    diagnosis: |
+      代码 review 通过但 commit 失败。多半是 git/远端权限或冲突。
+    prompt: |
+      提交失败。下一步：
+        1) 我手动处理，你 resume
+        2) 终止
+    routes:
+      "1": _resume_after_manual
+      "2": _abort

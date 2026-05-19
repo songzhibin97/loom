@@ -1,0 +1,121 @@
+name: issue-to-fix
+description: 一个 issue/bug 描述 → 复现 → 定位 → 修复 → 测试 → review → 提交。
+version: 1
+
+inputs:
+  - name: issue
+    description: issue 标题 + 正文（或 URL）
+    required: true
+
+start: triage
+
+states:
+
+  triage:
+    kind: skill
+    skill: issue-triage             # 输出：bug 假设、可能涉及的模块、复现步骤
+    on_pass: reproduce
+    on_fail: triage
+    max_attempts: 2
+    on_exceed: escalate_triage
+
+  reproduce:
+    kind: skill
+    skill: bug-reproduce            # 写一个能稳定复现的失败测试
+    on_pass: confirm_repro_gate
+    on_fail: reproduce
+    max_attempts: 3
+    on_exceed: escalate_triage
+
+  confirm_repro_gate:
+    kind: gate
+    prompt: |
+      已生成复现用例（artifacts/repro_test.md）。
+        - approve            采纳，进入修复
+        - revise <反馈>      复现不到位，回去重写
+        - back               诊断错了，回 triage
+        - abort
+    routes:
+      approve: implement_fix
+      revise:  reproduce
+      back:    triage
+      abort:   _abort
+    feedback_artifact: artifacts/repro_feedback.md
+
+  implement_fix:
+    kind: skill
+    skill: implement                # 复用 prd-to-ship 的 implement skill
+    on_pass: run_tests
+    on_fail: implement_fix
+    max_attempts: 3
+    on_exceed: escalate_diagnosis
+
+  run_tests:
+    kind: skill
+    skill: test-runner
+    on_pass: code_review
+    on_fail: implement_fix
+    max_attempts: 3
+    on_exceed: escalate_diagnosis
+
+  code_review:
+    kind: parallel
+    fan_out:
+      - skill: reviewer-quality
+      - skill: reviewer-test-honesty
+      - skill: reviewer-regression  # bug 修复专用：检查有没有引入新 regression
+    aggregator: review-aggregator
+    shared_inputs:
+      - { name: diff, path: artifacts/diff.patch }
+    on_pass: commit
+    on_fail: implement_fix
+    max_attempts: 2
+    on_exceed: escalate_diagnosis
+
+  commit:
+    kind: skill
+    skill: committer
+    on_pass: done
+    on_fail: commit
+    max_attempts: 2
+    on_exceed: escalate_commit
+
+  done:
+    kind: terminal
+    summary: |
+      Bug 修复完成。
+      产出：artifacts/diagnosis.md, artifacts/repro_test, artifacts/diff.patch
+
+  escalate_triage:
+    kind: human
+    prompt: |
+      Triage / 复现 阶段卡住。也许 issue 描述本身有歧义。下一步：
+        1) 我补充 issue 信息，从头来 (triage)
+        2) 我手动写复现用例，你 resume
+        3) 终止
+    routes:
+      "1": triage
+      "2": _resume_after_manual
+      "3": _abort
+
+  escalate_diagnosis:
+    kind: human
+    prompt: |
+      修复反复失败，怀疑根因诊断错了。下一步：
+        1) 回到 triage 重新诊断
+        2) 我手动修，你 resume
+        3) 终止
+    routes:
+      "1": triage
+      "2": _resume_after_manual
+      "3": _abort
+
+  escalate_commit:
+    kind: human
+    prompt: |
+      提交失败。下一步：
+        1) 手动处理，resume
+        2) 终止
+    routes:
+      "1": _resume_after_manual
+      "2": _abort

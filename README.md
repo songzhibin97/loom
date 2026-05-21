@@ -49,18 +49,19 @@ loom/
 ├── orchestrator/
 │   └── meta-agent.md        ← 编排器 prompt（CLI 无关，由 slash command 加载）
 ├── workflows/
-│   ├── prd-to-ship.yaml     ← 示例：需求 → PRD → TRD → impl → test → review → commit
+│   ├── prd-to-ship.yaml     ← 示例：需求 → PRD → TRD → 实现 → 独立写测试 → 真跑 → 变异验证 → review → commit
 │   └── issue-to-fix.yaml    ← 示例：issue → triage → 复现 → fix → review → commit
-├── skills/                  ← 13 个示例 skill
+├── skills/                  ← 14 个示例 skill
 │   ├── prd-clarify/SKILL.md
-│   ├── prd-author/SKILL.md
-│   ├── trd-author/SKILL.md
-│   ├── implement/SKILL.md
-│   ├── test-runner/SKILL.md
-│   ├── reviewer-quality/SKILL.md
+│   ├── prd-author/SKILL.md             ← 编号不变量
+│   ├── trd-author/SKILL.md             ← 不变量→实现→测试 映射
+│   ├── implement/SKILL.md              ← 只写代码（不写测试）
+│   ├── author-invariant-tests/SKILL.md ← 独立测试作者（看不到实现）
+│   ├── test-runner/SKILL.md            ← 真跑契约套件
+│   ├── mutation-verify/SKILL.md        ← 变异预言机
+│   ├── reviewer-quality/SKILL.md       ← 质量 + stub + 断言强度
 │   ├── reviewer-security/SKILL.md
-│   ├── reviewer-test-honesty/SKILL.md   ← 反"测试糊弄"
-│   ├── reviewer-regression/SKILL.md     ← bug 修复专用
+│   ├── reviewer-regression/SKILL.md    ← bug 修复专用
 │   ├── review-aggregator/SKILL.md
 │   ├── issue-triage/SKILL.md
 │   ├── bug-reproduce/SKILL.md
@@ -102,41 +103,55 @@ bash loom/verify.sh
 ```markdown
 ---
 name: trd-author
-description: 把已确认的 PRD 转成可实施的 TRD，包含模块拆分、接口签名、风险点
+description: 把 PRD 转成可实施的 TRD —— 核心是「不变量→实现→测试」映射
 inputs:
-  - name: prd
-    path: artifacts/PRD.md
+  - { name: prd, path: artifacts/PRD.md }
 outputs:
-  - name: trd
-    path: artifacts/TRD.md
+  - { name: trd, path: artifacts/TRD.md }
 success_criteria:
-  - TRD 里每个模块都标注了依赖和测试策略
-  - 列出至少 3 个落地风险
+  - "TRD 含『不变量→实现→测试 映射』表，PRD 每个 INV-N 和 NFR-N 都有一行"
+  - "每个 [hard] 不变量注明 enforcing 构造（条件 UPDATE / 唯一约束 / 状态校验）"
+  - "每个不变量都有 always-run 测试层；不允许只靠 db-gated 测试"
 retry_policy:
   max_attempts: 3
 ---
 
-你是高级软件工程师。基于 PRD 起草一份 TRD……
-（这里是 prompt body）
+你是高级软件工程师。把 PRD 的每条编号不变量映射到具体实现位置和测试……
+（prompt body）
 ```
 
-**一条 workflow 边（`workflows/prd-to-ship.yaml` 节选）：**
+**一段 workflow（`workflows/prd-to-ship.yaml` Phase 3 节选）：**
 
 ```yaml
-run_tests:
+implement:                          # 只写实现代码，不写测试
+  kind: skill
+  skill: implement
+  on_pass: author_tests
+  on_fail: implement
+  max_attempts: 3
+  on_exceed: escalate_trd
+
+author_tests:                       # 独立测试作者，看不到实现
+  kind: skill
+  skill: author-invariant-tests
+  on_pass: run_invariant_tests
+  on_fail: author_tests
+  max_attempts: 3
+  on_exceed: escalate_trd
+
+run_invariant_tests:                # 真跑契约套件 -race，逐 INV 对照
   kind: skill
   skill: test-runner
-  on_pass: code_review
-  on_fail: implement              # 测试挂了，回去重写
+  on_pass: mutation_verify
+  on_fail: implement                # 测试挂 → 实现偏离规格，回 implement
   max_attempts: 3
-  on_exceed: escalate_trd         # 试了 3 次还挂，TRD 可能有问题
+  on_exceed: escalate_trd
 
-code_review:
-  kind: parallel
-  fan_out: [reviewer-quality, reviewer-security, reviewer-test-honesty]
-  aggregator: review-aggregator
-  on_pass: commit
-  on_fail: implement
+mutation_verify:                    # 改坏 enforce 代码，确认测试变红
+  kind: skill
+  skill: mutation-verify
+  on_pass: code_review
+  on_fail: author_tests             # 测试没牙 → 重写测试
   max_attempts: 2
   on_exceed: escalate_trd
 ```

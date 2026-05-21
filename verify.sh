@@ -19,13 +19,14 @@ hdr()  { echo; echo "── $* ──"; }
 # ─────────────────────────────────────────────────────────────────────────────
 hdr "1. Directory layout"
 
-for d in orchestrator workflows skills spec docs adapters/claude-code/commands; do
+for d in orchestrator workflows skills spec docs adapters/claude-code/commands adapters/languages; do
   if [[ -d "$d" ]]; then ok "$d/"; else fail "missing dir: $d/"; fi
 done
 
 for f in orchestrator/meta-agent.md \
          spec/skill.md spec/workflow.md \
          adapters/claude-code/commands/workflow.md \
+         adapters/languages/README.md adapters/languages/go.md \
          README.md; do
   if [[ -f "$f" ]]; then ok "$f"; else fail "missing file: $f"; fi
 done
@@ -226,7 +227,7 @@ hdr "6a. Reviewer / aggregator templates use plain 'VERDICT:' line, not '## VERD
 # Orchestrator regex is `^VERDICT: (pass|fail)$`. Any reviewer / aggregator
 # template that puts `##` in front of VERDICT will not match → first run hits it.
 # Note: use here-string (not pipe) so fail() updates ERR in current shell.
-for sk in skills/reviewer-*/SKILL.md skills/review-aggregator/SKILL.md; do
+for sk in skills/reviewer-*/SKILL.md skills/review-aggregator/SKILL.md skills/mutation-verify/SKILL.md; do
   matches=$(grep -nE '^(#+|>|-)[[:space:]]+VERDICT:[[:space:]]*(pass|fail)' "$sk" || true)
   if [[ -n "$matches" ]]; then
     while IFS= read -r l; do
@@ -366,6 +367,41 @@ if [[ -n "$matches" ]]; then
   while IFS= read -r l; do echo "    $l"; done <<< "$matches"
 else
   ok "no vendor:* model_hint declarations"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "13. prd-to-ship.yaml contains the invariant-flow states"
+
+for state in author_tests run_invariant_tests mutation_verify; do
+  if grep -qE "^[[:space:]]+${state}:" workflows/prd-to-ship.yaml; then
+    ok "prd-to-ship has state: $state"
+  else
+    fail "prd-to-ship missing state: $state"
+  fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+hdr "14. Key skills carry execution-based interception rules in body"
+
+# implement must say it does NOT write tests (contract tests live in author-invariant-tests)
+if grep -qE "不写测试|不写任何测试文件|契约测试由独立" skills/implement/SKILL.md; then
+  ok "implement/SKILL.md carries the 'no tests' rule"
+else
+  fail "implement/SKILL.md should state implement does not write tests"
+fi
+
+# author-invariant-tests must say it does NOT read implementation source
+if grep -qE "不读实现|不读.*函数体|没有看过实现|不许去看" skills/author-invariant-tests/SKILL.md; then
+  ok "author-invariant-tests/SKILL.md carries the 'do not read implementation' rule"
+else
+  fail "author-invariant-tests/SKILL.md should state it does not read implementation source"
+fi
+
+# mutation-verify must restore the tree (cp/backup pattern, not git checkout)
+if grep -qE "还原|restore|mutbak" skills/mutation-verify/SKILL.md; then
+  ok "mutation-verify/SKILL.md carries the restore-tree rule"
+else
+  fail "mutation-verify/SKILL.md should describe how it restores the tree after each mutation"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -250,20 +250,22 @@ on entry (via /workflow run or /workflow continue):
 
 **当前实现状态：Claude Code 是主目标，Codex adapter 是 TBD。** 详见 `adapters/codex/README.md`。
 
-## 8. 反糊弄机制（Anti-cheating）
+## 8. 反糊弄机制（执行式拦截）
 
-模型在被压力下完成测试 / review 任务时，有几个常见的偷懒模式。每条都有对应的检测，且检测**不全靠"另一个 LLM 说没问题"**——尽量加确定性的 grep / 文件检查：
+实测表明：单纯的静态 review（grep + LLM 读测试代码）只能抓**懒**的假——`t.Skip` 字面量、`assert True`、明显缺断言；抓不到**用功**的假（看着丰满、断言的值是错的）。更深的病根是 *谁写测试 ≠ 谁的目标*：实现 sub-agent 自己也写测试时，它的局部激励就是「让测试过」，最便宜过法是写假测试和自己的 bug 串通。
 
-| 偷懒模式 | 检测办法 | 是否确定性 |
+新版 `prd-to-ship` 用**结构 + 执行**两层兜底，静态降为次级：
+
+| 偷懒模式 | 一级拦截（结构 / 执行） | 二级拦截（静态） |
 |---|---|---|
-| 测试断言写得过弱 | orchestrator grep diff 找 `assert True` / `expect(...).toBeDefined()` | ✓ |
-| 把失败的测试改成 skip | orchestrator grep diff 找 `@pytest.mark.skip` / `it.skip` / `xit` / `t.Skip` | ✓ |
-| Sub-agent 自报满足 success_criteria 但实际没满足 | orchestrator 独立再核对一遍（读 output 文件） | 半确定（仍靠 LLM judge） |
-| Review 给了"LGTM" 但没读 | reviewer-quality 的 success_criteria 要求"至少 3 处 file:line 引用" | 半确定 |
-| 新增测试和改动代码无关 | reviewer-test-honesty 的 prompt 检查 | LLM judge |
-| 跨厂商串通 | `model_hint: vendor:*`（**当前 Claude Code adapter 不支持，等 Codex adapter 实现**） | 未实现 |
+| 测试与 bug 串通（同一 agent 写两边） | **流程层独立**：契约测试由 `author-invariant-tests` sub-agent 写、**看不到实现代码**；`implement` sub-agent 不写测试 | — |
+| 不变量漏覆盖 | **结构强制**：PRD 编号 `INV-N` → TRD 映射逐条引用 → `author-invariant-tests` 必须每条 ≥1 测试 → `test-runner` 逐 INV 对照执行结果 | — |
+| 测试没牙（断言弱 / 编码 bug 当对） | **执行层**：`mutation-verify` 改坏 enforce 不变量的代码，跑该 INV 的契约测试必须变红；不变红 = 测试假，回 `author_tests` 重写 | `reviewer-quality` 静态扫弱断言（懒假预筛） |
+| 不变量测试静默跳过 | **执行层**：`test-runner` 把 SKIP 的不变量测试视为 fail；任一 INV 测试没 PASS = 整体失败 | — |
+| 实现 stub / 占位 / 空函数 | — | `reviewer-quality` 扫 `panic("not implemented")` / 空函数体 / 改动代码 TODO/FIXME |
+| Sub-agent 自报达标但产物没达标 | orchestrator 独立 judge 读 output 对照 success_criteria（同 LLM 自审，软兜底） | — |
 
-诚实声明：上面打 ✓ 的两条是确定性的（grep 不会糊弄），其它都还依赖 LLM judge——所以这是个"多层防御"而不是"绝对防糊弄"。真正的双盲要等 Codex adapter（可以指定不同模型）落地。
+**诚实声明：** 「执行层」是真正的 ground truth——测试真跑、变异真破坏、SKIP 真当失败。静态层（reviewer-quality）是补充懒假预筛。「独立测试作者」是流程层属性（不同 sub-agent + prompt 禁读实现源码）；loom 不能用 tool whitelist 硬隔（Task API 不支持，见 §8.5），所以「不读实现」靠 prompt 规则 + 输出抽查（看测试有没有引用 TRD 未声明的内部细节），不是绝对隔离。但**就算 prompt 被违反**，独立 sub-agent + spec-derived 测试 + 变异预言机三者叠加，已比「同 agent 写两边 + 静态 review」高一个量级。
 
 ## 8.5 Claude Code adapter 的硬限制（必须知道）
 
@@ -276,9 +278,9 @@ on entry (via /workflow run or /workflow continue):
 | `model_hint: vendor:openai` | 切厂商做盲审 | **完全做不到** | 真双盲必须靠 Codex adapter（TBD） |
 | `timeout_seconds: 600` | 超时控制 | Task 有自己的隐式超时，不可配 | 长 skill 可能被 Claude Code 自己掐掉 |
 
-加上这条："**Independent judge"实际是同一个 LLM**，不构成真正的独立验证——它只是把"读 output 文件 + 对照 criteria"这件事和 skill 执行隔开，但模型一致性偏差仍在。这部分的反糊弄真正靠的是 §8 表里打 ✓ 的两条确定性 grep。
+加上这条："**Independent judge"实际是同一个 LLM**，不构成真正的独立验证——它只是把"读 output 文件 + 对照 criteria"这件事和 skill 执行隔开，但模型一致性偏差仍在。这部分的反糊弄真正靠的是 §8 表里『一级拦截』那栏——执行式（真跑测试、变异预言机）+ 流程式（独立测试作者）。
 
-任何 spec / skill 文档里写 `model_hint: vendor:*` 等于在 Claude Code 下被静默降级。Codex adapter 实现后才能兑现。verify.sh 的 §8 会扫这类声明并 warn。
+任何 spec / skill 文档里写 `model_hint: vendor:*` 等于在 Claude Code 下被静默降级。Codex adapter 实现后才能兑现。verify.sh 的 §12 会扫这类声明并 warn。
 
 ## 8.6 没解决的运维问题（已知）
 

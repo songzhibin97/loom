@@ -61,8 +61,7 @@ states:
   code_review:
     kind: parallel
     fan_out:
-      - skill: reviewer-quality
-      - skill: reviewer-test-honesty
+      - skill: reviewer-quality     # 质量 + 完整性 + stub + 断言强度
       - skill: reviewer-regression  # bug 修复专用：检查有没有引入新 regression
     aggregator: review-aggregator
     shared_inputs:

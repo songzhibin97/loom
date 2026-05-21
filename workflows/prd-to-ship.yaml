@@ -74,36 +74,50 @@ states:
     feedback_artifact: artifacts/TRD_feedback.md
 
   # ============================================================
-  # Phase 3 — 实现 + 测试
+  # Phase 3 — 实现 → 独立写测试 → 真跑 → 变异验证
   # ============================================================
 
   implement:
     kind: skill
-    skill: implement
-    on_pass: run_tests
+    skill: implement                # 只写实现代码，不写测试
+    on_pass: author_tests
     on_fail: implement
     max_attempts: 3
     on_exceed: escalate_trd
 
-  run_tests:
+  author_tests:
     kind: skill
-    skill: test-runner
-    on_pass: code_review
-    on_fail: implement              # 测试挂 → 回去重写实现
+    skill: author-invariant-tests   # 独立测试作者：只看 PRD/TRD，看不到实现
+    on_pass: run_invariant_tests
+    on_fail: author_tests
     max_attempts: 3
-    on_exceed: escalate_trd         # 试了 3 次还挂 → 怀疑 TRD
+    on_exceed: escalate_trd
+
+  run_invariant_tests:
+    kind: skill
+    skill: test-runner              # 真跑契约套件 -race，逐不变量对照
+    on_pass: mutation_verify
+    on_fail: implement              # 不变量测试挂 → 实现偏离规格，回 implement
+    max_attempts: 3
+    on_exceed: escalate_trd
+
+  mutation_verify:
+    kind: skill
+    skill: mutation-verify          # 改坏 enforce 代码，确认 hard 不变量测试会变红
+    on_pass: code_review
+    on_fail: author_tests           # 测试没牙 → 回去重写测试
+    max_attempts: 2
+    on_exceed: escalate_trd
 
   # ============================================================
-  # Phase 4 — 并行多视角 review（含反糊弄）
+  # Phase 4 — 并行静态 review（次级；主拦截在 Phase 3）
   # ============================================================
 
   code_review:
     kind: parallel
     fan_out:
-      - skill: reviewer-quality
-      - skill: reviewer-security
-      - skill: reviewer-test-honesty       # 反"测试糊弄"
-        model_hint: vendor:openai          # 双盲：另一家模型来查
+      - skill: reviewer-quality     # 质量 + 完整性 + stub + 断言强度
+      - skill: reviewer-security    # 安全
     aggregator: review-aggregator
     shared_inputs:
       - { name: diff, path: artifacts/diff.patch }
@@ -130,7 +144,9 @@ states:
     kind: terminal
     summary: |
       跑完 prd-to-ship。
-      产出：artifacts/PRD.md, artifacts/TRD.md, artifacts/diff.patch, artifacts/review_verdict.md
+      产出：artifacts/PRD.md, artifacts/TRD.md, artifacts/diff.patch,
+            artifacts/test_manifest.md, artifacts/reviews/mutation.md,
+            artifacts/review_verdict.md
       历史与诊断见 history。
 
   # ============================================================

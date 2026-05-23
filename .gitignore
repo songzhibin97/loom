@@ -1,0 +1,17 @@
+# 工作流 run 产物（每次 /workflow run 都会生成）
+.workflow/
+
+# 测试目录（setup-test-env.sh 在外部建，但保险起见）
+test-env/
+sw-test/
+
+# OS / 编辑器
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# verify.sh 的临时输出
+/tmp/sw-verify.out
+build-report.txt

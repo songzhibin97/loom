@@ -19,7 +19,7 @@ hdr()  { echo; echo "── $* ──"; }
 # ─────────────────────────────────────────────────────────────────────────────
 hdr "1. Directory layout"
 
-for d in orchestrator workflows skills spec docs adapters/claude-code/commands adapters/languages; do
+for d in orchestrator examples examples/workflows examples/skills spec docs adapters/claude-code/commands adapters/languages; do
   if [[ -d "$d" ]]; then ok "$d/"; else fail "missing dir: $d/"; fi
 done
 
@@ -27,6 +27,7 @@ for f in orchestrator/meta-agent.md \
          spec/skill.md spec/workflow.md \
          adapters/claude-code/commands/workflow.md \
          adapters/languages/README.md adapters/languages/go.md \
+         examples/README.md \
          README.md; do
   if [[ -f "$f" ]]; then ok "$f"; else fail "missing file: $f"; fi
 done
@@ -52,9 +53,9 @@ import sys, os, yaml, pathlib
 
 RESERVED = {"_abort", "_resume_after_manual"}
 errs = []
-skill_dir = pathlib.Path("skills")
+skill_dir = pathlib.Path("examples/skills")
 
-for wf_path in sorted(pathlib.Path("workflows").glob("*.yaml")):
+for wf_path in sorted(pathlib.Path("examples/workflows").glob("*.yaml")):
     print(f"  · {wf_path}")
     try:
         with open(wf_path) as f:
@@ -127,7 +128,7 @@ for wf_path in sorted(pathlib.Path("workflows").glob("*.yaml")):
     # verify skill references
     for s in referenced_skills:
         if not (skill_dir / s / "SKILL.md").exists():
-            errs.append(f"{wf_path}: skill '{s}' is referenced but skills/{s}/SKILL.md doesn't exist")
+            errs.append(f"{wf_path}: skill '{s}' is referenced but examples/skills/{s}/SKILL.md doesn't exist")
 
 if errs:
     for e in errs:
@@ -146,7 +147,7 @@ import sys, pathlib, yaml
 errs = []
 required = {"name", "description", "inputs", "outputs", "success_criteria"}
 
-for sk in sorted(pathlib.Path("skills").glob("*/SKILL.md")):
+for sk in sorted(pathlib.Path("examples/skills").glob("*/SKILL.md")):
     text = sk.read_text()
     if not text.startswith("---\n"):
         errs.append(f"{sk}: no frontmatter")
@@ -227,7 +228,7 @@ hdr "6a. Reviewer / aggregator templates use plain 'VERDICT:' line, not '## VERD
 # Orchestrator regex is `^VERDICT: (pass|fail)$`. Any reviewer / aggregator
 # template that puts `##` in front of VERDICT will not match → first run hits it.
 # Note: use here-string (not pipe) so fail() updates ERR in current shell.
-for sk in skills/reviewer-*/SKILL.md skills/review-aggregator/SKILL.md skills/mutation-verify/SKILL.md; do
+for sk in examples/skills/reviewer-*/SKILL.md examples/skills/review-aggregator/SKILL.md examples/skills/mutation-verify/SKILL.md; do
   matches=$(grep -nE '^(#+|>|-)[[:space:]]+VERDICT:[[:space:]]*(pass|fail)' "$sk" || true)
   if [[ -n "$matches" ]]; then
     while IFS= read -r l; do
@@ -246,7 +247,7 @@ import sys, pathlib, yaml, re
 errs = []
 
 # (1) Walk workflow YAMLs structurally.
-for wf_path in sorted(pathlib.Path("workflows").glob("*.yaml")):
+for wf_path in sorted(pathlib.Path("examples/workflows").glob("*.yaml")):
     try:
         wf = yaml.safe_load(wf_path.read_text())
     except yaml.YAMLError:
@@ -305,7 +306,7 @@ hdr "9. Every SKILL.md has a JSON output contract block in body"
 python3 - <<'PYEOF' || ERR=$?
 import sys, pathlib, re
 errs = []
-for sk in sorted(pathlib.Path("skills").glob("*/SKILL.md")):
+for sk in sorted(pathlib.Path("examples/skills").glob("*/SKILL.md")):
     text = sk.read_text()
     # Strip frontmatter
     if text.startswith("---\n"):
@@ -361,7 +362,7 @@ fi
 hdr "12. Workflows don't use model_hint: vendor:* (Claude Code can't honor)"
 
 # Warn (not fail). vendor:* only works in Codex (TBD). We just want to surface it.
-matches=$(grep -nE "model_hint:\s*vendor:" workflows/*.yaml 2>/dev/null || true)
+matches=$(grep -nE "model_hint:\s*vendor:" examples/workflows/*.yaml 2>/dev/null || true)
 if [[ -n "$matches" ]]; then
   echo "  ⚠ vendor:* model_hint found (no-op in current Claude Code adapter):"
   while IFS= read -r l; do echo "    $l"; done <<< "$matches"
@@ -373,7 +374,7 @@ fi
 hdr "13. prd-to-ship.yaml contains the invariant-flow states"
 
 for state in author_tests run_invariant_tests mutation_verify; do
-  if grep -qE "^[[:space:]]+${state}:" workflows/prd-to-ship.yaml; then
+  if grep -qE "^[[:space:]]+${state}:" examples/workflows/prd-to-ship.yaml; then
     ok "prd-to-ship has state: $state"
   else
     fail "prd-to-ship missing state: $state"
@@ -384,21 +385,21 @@ done
 hdr "14. Key skills carry execution-based interception rules in body"
 
 # implement must say it does NOT write tests (contract tests live in author-invariant-tests)
-if grep -qE "不写测试|不写任何测试文件|契约测试由独立" skills/implement/SKILL.md; then
+if grep -qE "不写测试|不写任何测试文件|契约测试由独立" examples/skills/implement/SKILL.md; then
   ok "implement/SKILL.md carries the 'no tests' rule"
 else
   fail "implement/SKILL.md should state implement does not write tests"
 fi
 
 # author-invariant-tests must say it does NOT read implementation source
-if grep -qE "不读实现|不读.*函数体|没有看过实现|不许去看" skills/author-invariant-tests/SKILL.md; then
+if grep -qE "不读实现|不读.*函数体|没有看过实现|不许去看" examples/skills/author-invariant-tests/SKILL.md; then
   ok "author-invariant-tests/SKILL.md carries the 'do not read implementation' rule"
 else
   fail "author-invariant-tests/SKILL.md should state it does not read implementation source"
 fi
 
 # mutation-verify must restore the tree (cp/backup pattern, not git checkout)
-if grep -qE "还原|restore|mutbak" skills/mutation-verify/SKILL.md; then
+if grep -qE "还原|restore|mutbak" examples/skills/mutation-verify/SKILL.md; then
   ok "mutation-verify/SKILL.md carries the restore-tree rule"
 else
   fail "mutation-verify/SKILL.md should describe how it restores the tree after each mutation"

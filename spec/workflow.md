@@ -1,6 +1,11 @@
 # Workflow 规范
 
-一个 workflow = 一个 YAML 文件，路径形如 `workflows/<name>.yaml`。
+一个 workflow = 一个 YAML 文件。运行时**实际加载**的位置：
+
+1. `$PROJECT_ROOT/.loom-ext/workflows/<name>.yaml` —— 项目本地覆盖（可选，最高优先级）
+2. `$LOOM_EXT_HOME/workflows/<name>.yaml` —— 用户 ext 仓
+
+loom 框架的 `<LOOM_HOME>/examples/workflows/` 仅作参考，**不参与运行时查找**。本文档示例 `workflows/<name>.yaml` 默认意指你的 ext 仓里那份。
 
 它描述一个**有向图状态机**：节点是 state，边是 transition。orchestrator 读这个 YAML，按状态机跑。
 

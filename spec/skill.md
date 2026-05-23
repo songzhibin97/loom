@@ -1,6 +1,11 @@
 # Skill 规范
 
-一个 skill = 一个 markdown 文件，路径形如 `skills/<name>/SKILL.md`。
+一个 skill = 一个 markdown 文件。运行时**实际加载**的位置：
+
+1. `$PROJECT_ROOT/.loom-ext/skills/<name>/SKILL.md` —— 项目本地覆盖（可选，最高优先级）
+2. `$LOOM_EXT_HOME/skills/<name>/SKILL.md` —— 用户 ext 仓（如 `~/work/my-flow/skills/`）
+
+loom 框架自身的 `<LOOM_HOME>/examples/skills/` 仅作参考实现，**不参与运行时查找**。本文档约定的所有路径示例 `skills/<name>/...` 默认意指你的 ext 仓里那份。
 
 Skill 是**无状态、可替换、跨 workflow 复用**的"积木"。它不知道自己被谁调用、调用之前做了什么、调用之后还要做什么。它只看自己的 input 文件、按 prompt 干活、写 output 文件。
 

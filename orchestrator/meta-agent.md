@@ -163,7 +163,11 @@ loop:
 ## run_skill_state(s)
 
 1. **Render skill prompt.**
-   - 读 `skills/<s.skill>/SKILL.md`，解析 frontmatter（用 Bash + `python3 -c "import yaml; ..."`，或自己心算）
+   - **定位 skill SKILL.md**（按顺序，命中即停）：
+     a. `<PROJECT_ROOT>/.loom-ext/skills/<s.skill>/SKILL.md` ——项目本地覆盖
+     b. `$LOOM_EXT_HOME/skills/<s.skill>/SKILL.md` ——用户 ext 仓
+     都未命中 → 走 `on_fail`，notes 写 `"skill '<s.skill>' not found in <PROJECT_ROOT>/.loom-ext/skills/ or $LOOM_EXT_HOME/skills/"`。**不**在 `<LOOM_HOME>/skills/` 找——loom 框架本身不携带运行时 skill；`<LOOM_HOME>/examples/skills/` 仅作参考。
+   - 解析 frontmatter（用 Bash + `python3 -c "import yaml; ..."`，或自己心算）
    - **合并 input 路径**：
      - 起始：从 skill frontmatter 的 `inputs` 拿一份 `{name → path}` 映射
      - 覆盖：如果当前 workflow state `s` 有 `inputs:` 字段（spec/workflow.md §3），用 state 的 path 覆盖 skill 默认（同 name 覆盖同 name；新 name 追加）
@@ -342,14 +346,29 @@ loop:
 
 所有 "项目根下 `.workflow/...`" 都基于这个定义。把最终选定的路径写到 state.json 里以便 resume。
 
+### "框架"与"用户扩展仓"的定义
+
+loom 是 **lean engine + 用户 extension** 结构：
+
+- `LOOM_HOME` —— **框架**根目录，仅含 `orchestrator/` / `spec/` / `adapters/` / `verify.sh` / `examples/`。**不**携带运行时 skill / workflow。
+- `LOOM_EXT_HOME` —— **用户的扩展仓**（如 `~/work/my-flow`），运行时实际加载的 skill 和 workflow 在这里。结构：`<LOOM_EXT_HOME>/skills/<name>/SKILL.md`、`<LOOM_EXT_HOME>/workflows/<name>.yaml`。**用户必须在 shell rc 里 export**。
+- `<PROJECT_ROOT>/.loom-ext/` —— **项目本地覆盖**（可选）。若存在 `skills/<name>/SKILL.md` 或 `workflows/<name>.yaml`，优先级**高于** `$LOOM_EXT_HOME`。
+
+skill / workflow 查找一律按 ① project-local `.loom-ext/` → ② `$LOOM_EXT_HOME/` 的顺序。`<LOOM_HOME>/examples/` 仅作参考样板，**不**参与运行时查找。
+
 ### `/workflow run <name> "<requirement>"`
 
 1. **检查没有 active run**。读 `<PROJECT_ROOT>/.workflow/CURRENT`：
    - 不存在 → OK 继续
    - 存在且指向的 state.json 里 `current_state` 是 terminal 或 `_abort` → 删 CURRENT 后继续
    - 存在且指向 active run → **拒绝**：打印"已有 active run at <path>。先 `/workflow continue abort` 终止它，或 `/workflow status` 查看。"return。
-2. Resolve workflow path: `<self_workflow_home>/workflows/<name>.yaml`。不存在 → 报错 return。
-3. Lint workflow：start state 存在、所有引用的 state 和 skill 存在、每个 on_fail 边有 max_attempts + on_exceed。**建议优先用 `bash <self_workflow_home>/verify.sh`** 整体跑一遍。
+2. Resolve workflow path（按顺序，命中即停）：
+   a. `<PROJECT_ROOT>/.loom-ext/workflows/<name>.yaml`
+   b. `$LOOM_EXT_HOME/workflows/<name>.yaml`
+   都没命中 → 报错 return：
+   > workflow '<name>' not found. Checked: <PROJECT_ROOT>/.loom-ext/workflows/, $LOOM_EXT_HOME/workflows/.
+   > $LOOM_EXT_HOME='<value or unset>'. See <LOOM_HOME>/README.md for setup.
+3. Lint workflow：start state 存在、所有引用的 state 和 skill 存在、每个 on_fail 边有 max_attempts + on_exceed。**建议优先用 `LOOM_EXT_HOME=$LOOM_EXT_HOME bash <LOOM_HOME>/verify.sh`** 整体跑一遍——它会同时 lint `examples/` 与用户 `$LOOM_EXT_HOME`（若设置）。
 4. 生成 run_dir 绝对路径：`<PROJECT_ROOT>/.workflow/$(date +%Y-%m-%d-%H%M%S)-$(openssl rand -hex 3 || echo $RANDOM)/`
 5. `mkdir -p <run_dir>/artifacts <run_dir>/transcripts <run_dir>/artifacts/reviews`
 6. 把 requirement 写到 `<run_dir>/artifacts/requirement.md`

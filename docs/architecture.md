@@ -52,6 +52,32 @@
 
 改业务流程不动 skill；换 skill 实现不动 workflow；换 CLI 不动以上任何一层。
 
+## 2.5 物理分发：lean engine + ext
+
+四层模型是**逻辑**视图。**物理**上 loom 拆成三处：
+
+| 在哪 | 装什么 | 是不是 loom 自己 maintain |
+|---|---|---|
+| `$LOOM_HOME`（如 `~/.loom`）—— git clone 来的 loom 框架 | orchestrator/、spec/、adapters/、examples/、verify.sh | ✓ 是 |
+| `$LOOM_EXT_HOME`（如 `~/work/my-flow`）—— 用户的扩展仓 | skills/、workflows/ —— **运行时实际加载的** | ✗ 用户 maintain |
+| `<PROJECT_ROOT>/.loom-ext/`（可选）—— 项目本地覆盖 | skills/<override>/、workflows/<custom-flow>.yaml | ✗ 项目维护 |
+
+**loom 框架本身不携带运行时 skill 或 workflow**。它只在 `examples/` 里放参考实现，新人从这里 cherry 起手建自己的 `LOOM_EXT_HOME`。
+
+skill / workflow 查找顺序：
+
+```
+1. $PROJECT_ROOT/.loom-ext/skills/<name>/SKILL.md     ← 项目本地（最高优先级）
+2. $LOOM_EXT_HOME/skills/<name>/SKILL.md              ← 用户 ext 仓
+都未命中 → 报错。$LOOM_HOME/examples/ 不参与运行时查找。
+```
+
+为什么这样分：
+
+- **框架与内容解耦**。loom 引擎升级不会冲掉用户改过的 skill 内容；用户改 skill 也不需要 fork 框架。
+- **多团队多版本**。每个团队一个 ext 仓，互不污染；不同项目也可钉不同 loom 版本。
+- **参考实现常驻**。`examples/` 跟着 loom 走，verify.sh 同时 lint 它，「loom 设想的标准用法」永远可对照、不会烂掉。
+
 ## 3. 状态机语义
 
 ### 3.1 State 种类

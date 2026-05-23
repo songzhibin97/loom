@@ -6,9 +6,11 @@ allowed-tools: Task, Read, Write, Edit, Bash, Glob, Grep
 
 You are now the **loom orchestrator**. The user invoked you via `/workflow $ARGUMENTS`.
 
-## Step 1 — Locate and load your operating manual
+## Step 1 — Locate the framework and the ext repo
 
-Find `LOOM_HOME` by trying in order:
+### Find `LOOM_HOME` (the framework)
+
+Try in order:
 
 1. `$LOOM_HOME` env var if set
 2. `$(git rev-parse --show-toplevel)/loom` if you're in a git repo
@@ -16,13 +18,32 @@ Find `LOOM_HOME` by trying in order:
 
 Then Read `<LOOM_HOME>/orchestrator/meta-agent.md`. If the file isn't found in any of these locations, print:
 
-> loom not installed. Expected at one of: $LOOM_HOME, <git-toplevel>/loom, or ./loom. See README.md for setup.
+> loom (framework) not installed. Expected at one of: $LOOM_HOME, <git-toplevel>/loom, or ./loom. See README.md for setup.
 
 and stop.
 
-Also compute `PROJECT_ROOT` (where `.workflow/` lives) the same way as meta-agent describes: `$LOOM_PROJECT_ROOT` → `git rev-parse --show-toplevel` → cwd. Keep `LOOM_HOME` and `PROJECT_ROOT` straight — they're often different paths.
+### Find `LOOM_EXT_HOME` (the user's skill/workflow repo)
 
-That manual is your authoritative spec. **Read the whole file.**
+loom is **lean engine + user extension** — it does NOT ship runtime skills or workflows. Those live in the user's ext repo (e.g., `~/work/my-flow`).
+
+Resolution: just read `$LOOM_EXT_HOME` env var (set in the user's shell rc by their ext-repo `install.sh`).
+
+If `$LOOM_EXT_HOME` is unset AND the current project has no `<PROJECT_ROOT>/.loom-ext/skills/` directory, print this hint up front (don't stop yet — `/workflow list` and `/workflow status` still work without it):
+
+> Note: $LOOM_EXT_HOME is unset and this project has no `.loom-ext/`. Runtime workflows and skills won't resolve until you either:
+>   (1) clone your ext repo and `export LOOM_EXT_HOME=<path>`, or
+>   (2) carry `.loom-ext/skills/...` + `.loom-ext/workflows/...` in this project.
+> See <LOOM_HOME>/README.md and <LOOM_HOME>/examples/README.md.
+
+### Find `PROJECT_ROOT` (where `.workflow/` lives)
+
+Same as meta-agent describes: `$LOOM_PROJECT_ROOT` → `git rev-parse --show-toplevel` → cwd.
+
+Keep `LOOM_HOME`, `LOOM_EXT_HOME`, and `PROJECT_ROOT` straight — they're three different paths.
+
+### Read the manual
+
+`<LOOM_HOME>/orchestrator/meta-agent.md` is your authoritative spec. **Read the whole file.**
 
 ## Step 2 — Dispatch on `$ARGUMENTS`
 
